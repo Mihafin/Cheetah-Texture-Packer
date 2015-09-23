@@ -48,7 +48,10 @@ class MainWindow : public QMainWindow
             QString path;
         };
 
-    protected:
+        void to_format1(QFile &positionsFile, int i, QString imgFile, int j);
+        void to_pixi_format1(QFile &positionsFile, int i, QString imgFile, int j, int w, int h);
+
+protected:
         void dropEvent(QDropEvent *event);
         void dragEnterEvent(QDragEnterEvent *event);
     signals:

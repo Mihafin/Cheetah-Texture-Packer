@@ -4,6 +4,11 @@
 #include <QMessageBox>
 #include <QTextStream>
 #include <QMimeData>
+#include <QJsonDocument>
+#include <QJsonValue>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <qDebug>
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
@@ -140,6 +145,131 @@ void MainWindow::deleteSelectedTiles()
     qDeleteAll(ui->tilesList->selectedItems());
 }
 
+void MainWindow::to_pixi_format1(QFile &positionsFile, int i, QString imgFile, int j, int w, int h)
+{
+    QJsonObject size;
+    size.insert("w", w);
+    size.insert("h", h);
+
+    QJsonObject frames;
+
+    for(i = 0; i < packer.images.size(); i++)
+    {
+        if(packer.images.at(i).textureId != j)
+        {
+            continue;
+        }
+
+        QPoint pos(packer.images.at(i).pos.x() + packer.border.l + packer.extrude,
+                   packer.images.at(i).pos.y() + packer.border.t + packer.extrude);
+        QSize size, sizeOrig;
+        QRect crop;
+        sizeOrig = packer.images.at(i).size;
+        if(!packer.cropThreshold)
+        {
+            size = packer.images.at(i).size;
+            crop = QRect(0, 0, size.width(), size.height());
+        }
+        else
+        {
+            size = packer.images.at(i).crop.size();
+            crop = packer.images.at(i).crop;
+        }
+        if(packer.images.at(i).rotated)
+        {
+            size.transpose();
+            crop = QRect(crop.y(), crop.x(), crop.height(), crop.width());
+        }
+
+        QJsonObject frame_size;
+        frame_size.insert("x", pos.x());
+        frame_size.insert("y", pos.y());
+        frame_size.insert("w", crop.width());
+        frame_size.insert("h", crop.height());
+
+        QJsonObject spriteSourceSize;
+        spriteSourceSize.insert("x", crop.x());
+        spriteSourceSize.insert("y", crop.y());
+        spriteSourceSize.insert("w", frame_size["w"]);
+        spriteSourceSize.insert("h", frame_size["h"]);
+
+        QJsonObject sourceSize;
+        sourceSize.insert("w", sizeOrig.width());
+        sourceSize.insert("h", sizeOrig.height());
+
+        QJsonObject frame_data;
+        frame_data.insert("frame", frame_size);
+        frame_data.insert("rotated", packer.images.at(i).rotated);
+        frame_data.insert("trimmed", true);
+        frame_data.insert("spriteSourceSize", spriteSourceSize);
+        frame_data.insert("sourceSize", sourceSize);
+
+        frames.insert((static_cast<packerData *>(packer.images.at(i).id))->listItem->text(), frame_data);
+    }
+
+    QJsonObject meta;
+    meta.insert("app", "chetah");
+    meta.insert("version", "1.0");
+    meta.insert("image", imgFile);
+    meta.insert("format", "RGBA8888");
+    meta.insert("size", size);
+
+    QJsonObject object;
+    object.insert("frames", frames);
+    object.insert("meta", meta);
+
+    qDebug() << object;
+
+    QJsonDocument saveDoc(object);
+    positionsFile.write(saveDoc.toJson(QJsonDocument::Compact));
+    positionsFile.close();
+}
+
+void MainWindow::to_format1(QFile &positionsFile, int i, QString imgFile, int j)
+{
+    QTextStream out(&positionsFile);
+    out << "textures: " << imgFile << "\n";
+    for(i = 0; i < packer.images.size(); i++)
+    {
+        if(packer.images.at(i).textureId != j)
+        {
+            continue;
+        }
+        QPoint pos(packer.images.at(i).pos.x() + packer.border.l + packer.extrude,
+                   packer.images.at(i).pos.y() + packer.border.t + packer.extrude);
+        QSize size, sizeOrig;
+        QRect crop;
+        sizeOrig = packer.images.at(i).size;
+        if(!packer.cropThreshold)
+        {
+            size = packer.images.at(i).size;
+            crop = QRect(0, 0, size.width(), size.height());
+        }
+        else
+        {
+            size = packer.images.at(i).crop.size();
+            crop = packer.images.at(i).crop;
+        }
+        if(packer.images.at(i).rotated)
+        {
+            size.transpose();
+            crop = QRect(crop.y(), crop.x(), crop.height(), crop.width());
+        }
+        out << ((static_cast<packerData *>(packer.images.at(i).id))->listItem)->text()
+            <<
+            "\t" <<
+            pos.x() << "\t" <<
+            pos.y() << "\t" <<
+            crop.width() << "\t" <<
+            crop.height() << "\t" <<
+            crop.x() << "\t" <<
+            crop.y() << "\t" <<
+            sizeOrig.width() << "\t" <<
+            sizeOrig.height() << "\t" <<
+            (packer.images.at(i).rotated ? "r" : "") << "\n";
+    }
+}
+
 void MainWindow::packerUpdate()
 {
     int i;
@@ -185,7 +315,7 @@ void MainWindow::packerUpdate()
             {
                 outputFile += QString("_") + QString::number(j + 1);
             }
-            outputFile += ".atlas";
+            outputFile += ".json"; //was "atlas"
             QString imgFile = outFile;
             if(textures.count() > 1)
             {
@@ -194,54 +324,16 @@ void MainWindow::packerUpdate()
             imgFile += ".";
             imgFile += outFormat.toLower();
 
-            QFile positionsFile(outputFile);
-            if(!positionsFile.open(QIODevice::WriteOnly | QIODevice::Text))
+            QFile *positionsFile = new QFile(outputFile);
+            if(!positionsFile->open(QIODevice::WriteOnly | QIODevice::Text))
             {
                 QMessageBox::critical(0, tr("Error"), tr("Cannot create file ") + outputFile);
             }
             else
             {
-                QTextStream out(&positionsFile);
-                out << "textures: " << imgFile << "\n";
-                for(i = 0; i < packer.images.size(); i++)
-                {
-                    if(packer.images.at(i).textureId != j)
-                    {
-                        continue;
-                    }
-                    QPoint pos(packer.images.at(i).pos.x() + packer.border.l + packer.extrude,
-                               packer.images.at(i).pos.y() + packer.border.t + packer.extrude);
-                    QSize size, sizeOrig;
-                    QRect crop;
-                    sizeOrig = packer.images.at(i).size;
-                    if(!packer.cropThreshold)
-                    {
-                        size = packer.images.at(i).size;
-                        crop = QRect(0, 0, size.width(), size.height());
-                    }
-                    else
-                    {
-                        size = packer.images.at(i).crop.size();
-                        crop = packer.images.at(i).crop;
-                    }
-                    if(packer.images.at(i).rotated)
-                    {
-                        size.transpose();
-                        crop = QRect(crop.y(), crop.x(), crop.height(), crop.width());
-                    }
-                    out << ((static_cast<packerData *>(packer.images.at(i).id))->listItem)->text()
-                        <<
-                        "\t" <<
-                        pos.x() << "\t" <<
-                        pos.y() << "\t" <<
-                        crop.width() << "\t" <<
-                        crop.height() << "\t" <<
-                        crop.x() << "\t" <<
-                        crop.y() << "\t" <<
-                        sizeOrig.width() << "\t" <<
-                        sizeOrig.height() << "\t" <<
-                        (packer.images.at(i).rotated ? "r" : "") << "\n";
-                }
+//                to_format1(*positionsFile, i, imgFile, j);
+                qDebug() << "textures[j].w=" << textures[j].width();
+                to_pixi_format1(*positionsFile, i, imgFile, j, textures[j].width(), textures[j].height());
             }
         }
     }
